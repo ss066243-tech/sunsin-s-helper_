@@ -1255,7 +1255,7 @@
     if (!apiKey) {
       throw new Error("API_KEY_MISSING");
     }
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
 
     let delay = 800;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1883,7 +1883,7 @@
     const uaBrowser = navigator.userAgent.match(/(SamsungBrowser|Chrome|Safari|Firefox)\/[\d.]+/)?.[0] || "모바일 브라우저";
     const hasKey = !!getStoredApiKey();
     $("#diag").innerHTML = `
-      AI 답변 엔진: ${hasKey ? "✅ 키 등록됨 (Gemini 2.5 Flash)" : "⚠️ 키 미등록 (기본 자료만 검색됨)"}<br>
+      AI 답변 엔진: ${hasKey ? "✅ 키 등록됨 (Gemini 3.8 Flash)" : "⚠️ 키 미등록 (기본 자료만 검색됨)"}<br>
       자료·기록 저장: ${fbReady && currentUser ? "✅ 클라우드 동기화 + 기기 저장" : "✅ 이 기기에 안전하게 저장"}<br>
       <span class="sub" style="font-size:14px">브라우저: ${esc(uaBrowser)}</span>
     `;
