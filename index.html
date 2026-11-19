@@ -1255,25 +1255,59 @@
     if (!apiKey) {
       throw new Error("API_KEY_MISSING");
     }
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const models = ["gemini-3-flash-preview", "gemini-3.8-flash"];
+    let lastErr = null;
 
-    let delay = 800;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const res = await fetch(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) {
-          let errDetail = "";
-          try {
-            const errJson = await res.json();
-            errDetail = errJson?.error?.message || "";
-          } catch (_) {}
-          if (res.status === 400 || res.status === 403) {
-            throw new Error(`HTTP ${res.status}${errDetail ? ` (${errDetail})` : ""}`);
+    for (const modelName of models) {
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      let delay = 800;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const res = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) {
+            let errDetail = "";
+            try {
+              const errJson = await res.json();
+              errDetail = errJson?.error?.message || "";
+            } catch (_) {}
+            const httpErr = new Error(`[${modelName}] HTTP ${res.status}${errDetail ? ` (${errDetail})` : ""}`);
+            if (res.status === 404) {
+              lastErr = httpErr;
+              break;
+            }
+            if (res.status === 400 || res.status === 403) {
+              throw httpErr;
+            }
+            if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+              await new Promise((r) => setTimeout(r, delay));
+              delay *= 2;
+              continue;
+            }
+            throw httpErr;
           }
+          return await res.json();
+        } catch (err) {
+          lastErr = err;
+          const msg = String(err?.message || "");
+          if (msg.includes("403") || msg.includes("400") || msg.includes("API_KEY_MISSING")) {
+            throw err;
+          }
+          if (attempt === maxRetries) {
+            break;
+          }
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 2;
+        }
+      }
+    }
+
+    throw lastErr || new Error("AI 연결에 실패했어요.");
+  }
           if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
             await new Promise((r) => setTimeout(r, delay));
             delay *= 2;
@@ -1883,7 +1917,7 @@
     const uaBrowser = navigator.userAgent.match(/(SamsungBrowser|Chrome|Safari|Firefox)\/[\d.]+/)?.[0] || "모바일 브라우저";
     const hasKey = !!getStoredApiKey();
     $("#diag").innerHTML = `
-      AI 답변 엔진: ${hasKey ? "✅ 키 등록됨 (Gemini 3.8 Flash)" : "⚠️ 키 미등록 (기본 자료만 검색됨)"}<br>
+      AI 답변 엔진: ${hasKey ? "✅ 키 등록됨 (Gemini 3 Flash)" : "⚠️ 키 미등록 (기본 자료만 검색됨)"}<br>
       자료·기록 저장: ${fbReady && currentUser ? "✅ 클라우드 동기화 + 기기 저장" : "✅ 이 기기에 안전하게 저장"}<br>
       <span class="sub" style="font-size:14px">브라우저: ${esc(uaBrowser)}</span>
     `;
