@@ -1318,7 +1318,7 @@
         callMode ? "[통화 내용]\n" : "[질문]\n"
       }${q}`;
 
-      const payload = {
+      const payloadWithSearch = {
         contents: [{ parts: [{ text: userPrompt }] }],
         tools: [{ google_search: {} }],
         systemInstruction: {
@@ -1326,7 +1326,24 @@
         }
       };
 
-      const result = await fetchGeminiWithRetry(payload);
+      let result = null;
+      try {
+        result = await fetchGeminiWithRetry(payloadWithSearch, 1);
+      } catch (searchErr) {
+        const msg = String(searchErr?.message || "");
+        if (msg.includes("API_KEY_MISSING") || msg.includes("API key not valid")) {
+          throw searchErr;
+        }
+        // 구글 검색 그라운딩이 무료 키에서 거절될 경우 일반 AI 호출로 자동 재시도
+        const payloadStandard = {
+          contents: [{ parts: [{ text: userPrompt }] }],
+          systemInstruction: {
+            parts: [{ text: SYSTEM_INSTRUCTION }]
+          }
+        };
+        result = await fetchGeminiWithRetry(payloadStandard, 1);
+      }
+
       const candidate = result?.candidates?.[0];
       const text = candidate?.content?.parts?.map((p) => p.text || "").join("").trim();
 
