@@ -801,6 +801,17 @@
         </div>
 
         <details class="small" style="margin-top:16px">
+          <summary>🔑 제미나이 AI 연결 키 설정 (깃허브·외부 웹용)</summary>
+          <div>
+            <p class="sub" style="margin-top:4px">Google AI Studio(aistudio.google.com)에서 발급받은 <b>AIza...</b> 키를 한 번 저장하면 깃허브 주소에서도 실시간 AI와 구글 검색이 작동해요.</p>
+            <label for="apiKeyInput">Gemini API 키</label>
+            <input type="password" id="apiKeyInput" placeholder="AIzaSy..." autocomplete="off">
+            <button class="btn ghost" id="saveApiKeyBtn" type="button">API 키 저장</button>
+            <div class="prog" id="apiKeyMsg"></div>
+          </div>
+        </details>
+
+        <details class="small" style="margin-top:16px">
           <summary>⚙️ 관리자 비밀번호 변경</summary>
           <div>
             <label for="newPinInput">새 비밀번호 (4~8자리 숫자)</label>
@@ -905,6 +916,7 @@
   const LK_HIST = "sunsin-history-v1";
   const LK_KB = "sunsin-kb-v1";
   const LK_PIN = "sunsin-admin-pin-v1";
+  const LK_API = "sunsin-gemini-key-v1";
   const MAX_HIST = 300;
 
   let HIST = [];
@@ -1230,10 +1242,20 @@
     );
   }
 
+  function getStoredApiKey() {
+    try {
+      return (localStorage.getItem(LK_API) || "").trim();
+    } catch (_) {
+      return "";
+    }
+  }
+
   async function fetchGeminiWithRetry(payload, maxRetries = 2) {
-    const fallbackKey = "AQ.Ab8RN6LeQB59PnCWbkUi_ezmmPJIrFXIjxgNCAbp69zNGj2tGQ";
-    const apiKey = fallbackKey; // 제공된 키 반영 (런타임 키가 있으면 우선 사용)
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const apiKey = getStoredApiKey();
+    if (!apiKey) {
+      throw new Error("API_KEY_MISSING");
+    }
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
 
     let delay = 800;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1244,20 +1266,25 @@
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          // 403(권한 제한)이나 400(키 미설정)은 재시도해도 같으므로 즉시 폴백으로 넘김
-          if (res.status === 403 || res.status === 400) {
-            throw new Error(`HTTP ${res.status}`);
+          let errDetail = "";
+          try {
+            const errJson = await res.json();
+            errDetail = errJson?.error?.message || "";
+          } catch (_) {}
+          if (res.status === 400 || res.status === 403) {
+            throw new Error(`HTTP ${res.status}${errDetail ? ` (${errDetail})` : ""}`);
           }
           if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
             await new Promise((r) => setTimeout(r, delay));
             delay *= 2;
             continue;
           }
-          throw new Error(`HTTP ${res.status}`);
+          throw new Error(`HTTP ${res.status}${errDetail ? ` (${errDetail})` : ""}`);
         }
         return await res.json();
       } catch (err) {
-        if (attempt === maxRetries || String(err?.message || "").includes("403") || String(err?.message || "").includes("400")) {
+        const msg = String(err?.message || "");
+        if (attempt === maxRetries || msg.includes("403") || msg.includes("400") || msg.includes("API_KEY_MISSING")) {
           throw err;
         }
         await new Promise((r) => setTimeout(r, delay));
@@ -1284,6 +1311,7 @@
     let answerText = null;
     let sources = [];
     let usedFallback = false;
+    let aiErrorMsg = "";
 
     try {
       const userPrompt = `${callMode ? FORMAT_CALL : FORMAT_ONE}[기본 자료 및 새로 올린 자료]\n${buildFullKnowledge()}\n\n${
@@ -1317,17 +1345,26 @@
           return true;
         });
       }
-    } catch (_) {
-      // AI 실패 시 로컬 자료 검색으로 자동 폴백
+    } catch (err) {
+      aiErrorMsg = String(err?.message || "");
     }
 
     if (!answerText) {
       usedFallback = true;
       const localFound = callMode ? null : searchLocalData(q);
+      const reasonNote =
+        aiErrorMsg === "API_KEY_MISSING"
+          ? "\n\n(참고: 현재 AI 연결 키가 등록되지 않아 기본 자료에서만 찾았어요. 아들에게 ‘도구 → 아들 전용 → 제미나이 AI 연결 키 설정’에 키를 넣어 달라고 해 주세요.)"
+          : aiErrorMsg
+          ? `\n\n(참고: AI 연결 오류 [${aiErrorMsg}] 때문에 기본 자료에서만 찾았어요.)`
+          : "";
+
       if (localFound) {
-        answerText = localFound;
+        answerText = localFound + reasonNote;
       } else {
-        answerText = "올려 둔 자료에는 이 내용이 없어요.\n다른 말로 다시 물어보시거나, 아들에게 이 내용 자료를 넣어 달라고 해 주세요.";
+        answerText =
+          "올려 둔 기본 자료에는 이 내용이 없어요.\n다른 말로 다시 물어보시거나, 아들에게 이 내용 자료를 넣어 달라고 해 주세요." +
+          reasonNote;
       }
     }
 
@@ -1350,7 +1387,7 @@
     $("#go").disabled = false;
     BUSY = false;
 
-    if (!usedFallback || !answerText.startsWith("올려 둔 자료에는")) {
+    if (!usedFallback || !answerText.startsWith("올려 둔 기본 자료에는")) {
       const shortTitle = callMode ? "📞 " + q.replace(/\s+/g, " ").slice(0, 60) + "…" : q;
       const kindLabel = callMode ? "통화 정리" : how === "말" ? "말로 물어봄" : "글로 물어봄";
       addHistory(shortTitle, answerText, kindLabel, callMode ? q : "");
@@ -1593,9 +1630,26 @@
       $("#adminPanel").hidden = false;
       $("#pinInput").value = "";
       $("#pinMsg").textContent = "";
+      $("#apiKeyInput").value = getStoredApiKey();
       renderKbList();
     } else {
       $("#pinMsg").textContent = "비밀번호가 맞지 않아요. 다시 확인해 주세요.";
+    }
+  });
+
+  $("#saveApiKeyBtn").addEventListener("click", () => {
+    const key = ($("#apiKeyInput").value || "").trim();
+    try {
+      if (key) {
+        localStorage.setItem(LK_API, key);
+        $("#apiKeyMsg").textContent = "✅ AI 연결 키가 저장되었어요. 아래 ‘AI 연결 시험하기’로 확인해 보세요.";
+      } else {
+        localStorage.removeItem(LK_API);
+        $("#apiKeyMsg").textContent = "저장된 AI 연결 키를 지웠어요.";
+      }
+      updateDiagUI();
+    } catch (_) {
+      $("#apiKeyMsg").textContent = "키를 저장하지 못했어요.";
     }
   });
 
@@ -1800,19 +1854,19 @@
       const reply = res?.candidates?.[0]?.content?.parts?.[0]?.text || "";
       outEl.textContent = reply ? `✅ 응답: ${reply.trim().slice(0, 60)}` : "⚠️ 빈 응답이 왔어요.";
     } catch (err) {
-      const msg = err.message || "연결 제한";
+      const msg = String(err?.message || "");
       outEl.textContent =
-        msg.includes("403")
-          ? "ℹ️ 현재 미리보기 환경에서는 외부 AI 호출이 제한(HTTP 403)되어 있어요. 대신 내장 자료와 상담 도구로 바로 검색·답변됩니다."
-          : `❌ AI 연결 실패 (${msg}). 내장된 기본 자료 검색은 계속 작동합니다.`;
+        msg === "API_KEY_MISSING"
+          ? "❌ AI 연결 키가 아직 없어요. 아래 ‘아들 전용 → 제미나이 AI 연결 키 설정’에서 키를 입력해 주세요."
+          : `❌ AI 연결 실패 (${msg}). 실패 시에도 내장된 기본 자료 검색은 작동합니다.`;
     }
   });
 
   function updateDiagUI() {
     const uaBrowser = navigator.userAgent.match(/(SamsungBrowser|Chrome|Safari|Firefox)\/[\d.]+/)?.[0] || "모바일 브라우저";
+    const hasKey = !!getStoredApiKey();
     $("#diag").innerHTML = `
-      AI 답변 엔진: ✅ 준비됨 (Gemini)<br>
-      입력 방식: ✅ 글자 입력 전용<br>
+      AI 답변 엔진: ${hasKey ? "✅ 키 등록됨 (Gemini 2.5 Flash)" : "⚠️ 키 미등록 (기본 자료만 검색됨)"}<br>
       자료·기록 저장: ${fbReady && currentUser ? "✅ 클라우드 동기화 + 기기 저장" : "✅ 이 기기에 안전하게 저장"}<br>
       <span class="sub" style="font-size:14px">브라우저: ${esc(uaBrowser)}</span>
     `;
