@@ -1308,24 +1308,6 @@
 
     throw lastErr || new Error("AI 연결에 실패했어요.");
   }
-          if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
-            await new Promise((r) => setTimeout(r, delay));
-            delay *= 2;
-            continue;
-          }
-          throw new Error(`HTTP ${res.status}${errDetail ? ` (${errDetail})` : ""}`);
-        }
-        return await res.json();
-      } catch (err) {
-        const msg = String(err?.message || "");
-        if (attempt === maxRetries || msg.includes("403") || msg.includes("400") || msg.includes("API_KEY_MISSING")) {
-          throw err;
-        }
-        await new Promise((r) => setTimeout(r, delay));
-        delay *= 2;
-      }
-    }
-  }
 
   async function askQuestion(rawText, how = "글") {
     const q = maskPII((rawText || "").trim());
